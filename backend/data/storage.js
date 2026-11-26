@@ -567,23 +567,115 @@ class DataStore {
     const users = this.getAllUsers();
     const payments = Array.isArray(this.data.payments) ? this.data.payments : [];
 
-    const claimedBooks = books.filter(b => b.status === 'Claimed');
-    const overdueBooks = books.filter(b => b.loanInfo && b.loanInfo.isOverdue);
-    const totalPendingPenalties = overdueBooks.reduce((sum, b) => sum + (b.loanInfo?.penaltyAmount || 0), 0);
+    const availableBooksList = books.filter(b => b.status === 'Available');
+    const allottedBooksList = books.filter(b => b.status === 'Claimed');
+    const notSubmittedBooks = allottedBooksList.filter(b => b.loanInfo && b.loanInfo.overdueDays > 0);
+    const unpaidOverdueBooks = allottedBooksList.filter(b => b.loanInfo && b.loanInfo.isOverdue);
+    const onTimeAllottedBooks = allottedBooksList.filter(b => !b.loanInfo || b.loanInfo.overdueDays === 0);
+
+    const pendingBooksList = books.filter(b => Array.isArray(b.requestQueue) && b.requestQueue.length > 0);
+    const pendingRequests = [];
+    pendingBooksList.forEach(b => {
+      b.requestQueue.forEach(req => {
+        pendingRequests.push({
+          bookId: b._id,
+          bookTitle: b.title,
+          courseCode: b.courseCode,
+          currentHolderName: b.currentOwner?.name || 'Unknown',
+          currentHolderEmail: b.currentOwner?.email || '',
+          position: req.position,
+          requesterId: req.userId,
+          requesterName: req.name,
+          requesterEmail: req.email,
+          requestedAt: req.requestedAt
+        });
+      });
+    });
+
+    // Group persons who did not submit (overdue > 15 days) with total penalty
+    const defaulterMap = new Map();
+    notSubmittedBooks.forEach(b => {
+      const owner = b.currentOwner || {};
+      const key = owner._id || owner.email || 'unknown';
+      if (!defaulterMap.has(key)) {
+        defaulterMap.set(key, {
+          userId: owner._id || key,
+          name: owner.name || 'Unknown Student',
+          email: owner.email || '',
+          department: owner.department || 'N/A',
+          semester: owner.semester || '',
+          phone: owner.phone || 'N/A',
+          overdueBooksCount: 0,
+          totalOverdueDays: 0,
+          totalPenalty: 0,
+          unpaidPenalty: 0,
+          books: []
+        });
+      }
+      const entry = defaulterMap.get(key);
+      entry.overdueBooksCount += 1;
+      entry.totalOverdueDays += b.loanInfo.overdueDays || 0;
+      entry.totalPenalty += b.loanInfo.rawPenaltyAmount || 0;
+      entry.unpaidPenalty += b.loanInfo.penaltyAmount || 0;
+      entry.books.push({
+        _id: b._id,
+        title: b.title,
+        courseCode: b.courseCode,
+        claimedAt: b.loanInfo.claimedAt,
+        dueDate: b.loanInfo.dueDate,
+        daysHeld: b.loanInfo.daysHeld,
+        overdueDays: b.loanInfo.overdueDays,
+        penaltyAmount: b.loanInfo.penaltyAmount,
+        rawPenaltyAmount: b.loanInfo.rawPenaltyAmount,
+        penaltyPaid: b.loanInfo.penaltyPaid,
+        penaltyTxnId: b.loanInfo.penaltyTxnId
+      });
+    });
+    const defaultersByPerson = Array.from(defaulterMap.values()).sort((a, b) => b.unpaidPenalty - a.unpaidPenalty);
+
+    // Genre / Category breakdown
+    const genreMap = new Map();
+    books.forEach(b => {
+      const g = b.genre || 'Other';
+      if (!genreMap.has(g)) {
+        genreMap.set(g, { genre: g, total: 0, available: 0, allotted: 0, overdue: 0, pendingReqs: 0 });
+      }
+      const gm = genreMap.get(g);
+      gm.total += 1;
+      if (b.status === 'Available') gm.available += 1;
+      if (b.status === 'Claimed') gm.allotted += 1;
+      if (b.loanInfo && b.loanInfo.overdueDays > 0) gm.overdue += 1;
+      gm.pendingReqs += b.requestQueue?.length || 0;
+    });
+    const genreBreakdown = Array.from(genreMap.values()).sort((a, b) => b.total - a.total);
+
+    const totalPendingPenalties = unpaidOverdueBooks.reduce((sum, b) => sum + (b.loanInfo?.penaltyAmount || 0), 0);
     const totalCollectedPenalties = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
-    const totalQueuedRequests = books.reduce((sum, b) => sum + (b.requestQueue?.length || 0), 0);
 
     return {
       stats: {
         totalBooks: books.length,
-        availableBooks: books.filter(b => b.status === 'Available').length,
-        claimedBooks: claimedBooks.length,
-        overdueBooks: overdueBooks.length,
+        availableBooks: availableBooksList.length,
+        allottedBooks: allottedBooksList.length,
+        claimedBooks: allottedBooksList.length,
+        onTimeAllottedBooks: onTimeAllottedBooks.length,
+        pendingBooksCount: pendingBooksList.length,
+        totalQueuedRequests: pendingRequests.length,
+        overdueBooks: notSubmittedBooks.length,
+        unpaidOverdueBooks: unpaidOverdueBooks.length,
+        defaultersCount: defaultersByPerson.length,
         totalPendingPenalties,
         totalCollectedPenalties,
-        totalQueuedRequests,
         totalUsers: users.filter(u => u.role !== 'admin').length,
         totalTransactions: payments.length
+      },
+      analytics: {
+        availableBooks: availableBooksList,
+        allottedBooks: allottedBooksList,
+        pendingRequests,
+        notSubmittedBooks,
+        defaultersByPerson,
+        genreBreakdown
       },
       books,
       users,
