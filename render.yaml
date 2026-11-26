@@ -19,3 +19,7 @@ services:
         sync: false
       - key: EMAIL_PASS
         sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: SENDER_EMAIL
+        sync: false
