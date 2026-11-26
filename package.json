@@ -1,0 +1,15 @@
+{
+  "name": "book-exchange-chain",
+  "version": "1.0.0",
+  "description": "Second-Hand Book Exchange Chain with Ownership History Tracking (Course 24CIE554)",
+  "scripts": {
+    "setup": "npm install && npm install --prefix backend && npm install --prefix frontend",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "node backend/server.js",
+    "client": "npm run dev --prefix frontend",
+    "build": "npm run build --prefix frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
